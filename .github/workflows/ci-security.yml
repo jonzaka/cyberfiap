@@ -19,22 +19,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Semgrep: usa as regras de CI (cobertura geral) e falha se achar findings de severidade média/alta.
-      - name: Run Semgrep
-        uses: returntocorp/semgrep-action@v1
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
-          config: p/ci
-          generateSarif: true
-          sarifFile: semgrep.sarif
-        env:
-          SEMGREP_RULES: p/ci
+          python-version: '3.x'
+
+      - name: Install Semgrep
+        run: pip install semgrep
+
+      - name: Run Semgrep (SARIF output)
+        run: |
+          semgrep --config p/ci --sarif -o semgrep.sarif .
 
       - name: Upload Semgrep SARIF
         uses: actions/upload-artifact@v4
         with:
           name: semgrep-sarif-${{ github.run_id }}
           path: semgrep.sarif
-          if-no-files-found: warn
+          if-no-files-found: error
 
   sca-owasp-dependency-check:
     name: SCA - OWASP Dependency-Check
@@ -44,7 +46,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Varre o repo e gera HTML + XML + JSON
       - name: Dependency-Check (scan)
         uses: dependency-check/Dependency-Check_Action@main
         with:
@@ -57,8 +58,7 @@ jobs:
             --enableExperimental
 
       - name: List reports
-        run: |
-          ls -la reports || true
+        run: ls -la reports || true
 
       - name: Upload Dependency-Check reports
         uses: actions/upload-artifact@v4
