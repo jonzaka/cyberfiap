@@ -1,0 +1,40 @@
+name: CD - DAST (ZAP Baseline)
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  dast_zap:
+    name: DAST - ZAP Baseline Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Aponta para um site de teste vulnerável público (não precisa subir sua app)
+      - name: Run ZAP Baseline
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: "http://testphp.vulnweb.com"
+          cmd_options: "-a -j"   # -a ativa scan ativo leve; -j gera JSON
+          fail_action: false     # nunca falha o job, só gera relatório
+
+      - name: Upload ZAP report
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-report
+          path: |
+            report_html.html
+            report_json.json
+            zap.log
+
+      - name: Falhar se houver High no ZAP (básico)
+        run: |
+          if [ -f report_json.json ]; then
+            HIGH=$(jq '[.site[].alerts[] | select(.risk=="High")] | length' report_json.json || echo 0)
+            echo "High alerts: $HIGH"
+            if [ "$HIGH" -ge 1 ]; then
+              echo "ZAP: High alerts found"
+              exit 1
+            fi
+          fi || true
