@@ -17,7 +17,9 @@ jobs:
         with:
           target: "http://testphp.vulnweb.com"
           cmd_options: "-a -j"   # -a ativa scan ativo leve; -j gera JSON
-          fail_action: false     # nunca falha o job, só gera relatório
+        env:
+          GITHUB_TOKEN: ""
+ # nunca falha o job, só gera relatório
 
       - name: Upload ZAP report
         uses: actions/upload-artifact@v4
