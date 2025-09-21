@@ -48,25 +48,29 @@ jobs:
           fi || true
 
   sca_dependency_check:
-    name: SCA - OWASP Dependency-Check
+    name: SCA - OWASP Dependency-Check (Docker)
     runs-on: ubuntu-latest
     needs: sast_semgrep
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run OWASP Dependency-Check (Action oficial)
-        uses: dependency-check/Dependency-Check_Action@main
-        with:
-          project: "${{ github.repository }}"
-          path: "."
-          format: "HTML,JSON"
-          out: "depcheck"
-          args: >
-            --enableExperimental
-            --failOnCVSS 7.0
+      - name: Preparar pastas de relatório
+        run: mkdir -p dep_out
+
+      - name: Rodar Dependency-Check (Docker)
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}":/src \
+            -v "${{ github.workspace }}/dep_out":/report \
+            owasp/dependency-check:latest \
+            --project "${{ github.repository }}" \
+            --scan /src \
+            --format "ALL" \
+            --out /report \
+            --failOnCVSS 7.0 || true
 
       - name: Upload Dependency-Check reports
         uses: actions/upload-artifact@v4
         with:
           name: dependency-check-reports
-          path: depcheck/
+          path: dep_out/
