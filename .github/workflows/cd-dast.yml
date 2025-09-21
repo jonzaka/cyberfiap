@@ -5,6 +5,11 @@ on:
     branches: [ "main" ]
   workflow_dispatch:
 
+# ✅ dá permissão para criar artifacts
+permissions:
+  contents: read
+  actions: write
+
 jobs:
   dast_zap:
     name: DAST - ZAP Baseline Scan
@@ -12,8 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Roda a action oficial do ZAP. Se ela falhar ao subir artifact interno,
-      # seguimos em frente (vamos fazer nosso próprio upload).
+      # roda a action oficial do ZAP; se ela falhar ao subir artifact interno, seguimos
       - name: Run ZAP Baseline (ignore internal artifact errors)
         id: zap
         uses: zaproxy/action-baseline@v0.12.0
@@ -22,25 +26,23 @@ jobs:
           target: "http://testphp.vulnweb.com"
           cmd_options: "-a -j"
           allow_issue_writing: false
-          # Mesmo se ela tentar criar artifact, não tem problema — não vamos depender disso.
-          artifact_name: zapreport
+          # não dependemos desse artifact interno, mas deixar não atrapalha
+          artifact_name: zap
 
-      # Só para conferência no log
-      - name: Show generated reports
+      - name: List generated reports
         run: |
-          echo "Workspace files:"
           ls -la
-          echo "Expecting these files from ZAP action:"
           ls -la report_* || true
 
-      # Nosso upload oficial (independente da action do ZAP)
-      - name: Upload ZAP reports (ours)
+      # ✅ nosso upload oficial, com nome único e overwrite
+      - name: Upload ZAP reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: zapreport
+          name: zapreport-${{ github.run_id }}
           path: |
             report_html.html
             report_json.json
             report_md.md
+          overwrite: true
           if-no-files-found: warn
