@@ -12,15 +12,15 @@ jobs:
       - uses: actions/checkout@v4
 
       # 1) Executa o ZAP em um container nomeado
-      - name: Run ZAP Baseline (Docker, named container)
+      - name: Run ZAP Baseline (Docker)
         run: |
-          docker run --name zapscan --rm -t \
+          docker run --rm \
             -v "${{ github.workspace }}:/zap/wrk/:rw" \
-            owasp/zap2docker-stable \
+            ghcr.io/zaproxy/zap2docker-stable \
             zap-baseline.py \
             -t http://testphp.vulnweb.com \
-            -r report.html \
-            -J report.json || true
+            -w /zap/wrk/zap_report.html \
+            -J /zap/wrk/zap_report.json || true
 
       # 2) Lista o que o ZAP deixou dentro do volume/contêiner
       - name: Debug - list files
