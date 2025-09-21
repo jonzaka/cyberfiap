@@ -1,50 +1,71 @@
-name: DAST - ZAP Baseline Scan
+name: CI - Security (SAST + SCA)
 
 on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  zap-baseline:
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-      actions: write
+  sast-semgrep:
+    name: SAST - Semgrep
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Run ZAP Baseline (Docker)
-        run: |
-          # Desarma o "fail fast" só durante o ZAP, para não quebrar o job por exit code > 0
-          set +e
-          docker pull ghcr.io/zaproxy/zaproxy:stable -q
-          docker run \
-            -v "$PWD:/zap/wrk/:rw" \
-            --network=host \
-            -t ghcr.io/zaproxy/zaproxy:stable \
-            zap-baseline.py \
-              -t "http://testphp.vulnweb.com" \
-              -J report_json.json \
-              -w report_md.md \
-              -r report_html.html \
-              -a -j
-          echo "ZAP exit code: $?"
-          # Reativa o "fail fast" pro resto da pipeline
-          set -e
+      # Semgrep: usa as regras de CI (cobertura geral) e falha se achar findings de severidade média/alta.
+      - name: Run Semgrep
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: p/ci
+          generateSarif: true
+          sarifFile: semgrep.sarif
+        env:
+          SEMGREP_RULES: p/ci
 
-      - name: List generated files (debug)
-        run: |
-          ls -la
-          ls -la report_* || true
-
-      - name: Upload ZAP report
+      - name: Upload Semgrep SARIF
         uses: actions/upload-artifact@v4
         with:
-          name: zapreport-${{ github.run_id }}
+          name: semgrep-sarif-${{ github.run_id }}
+          path: semgrep.sarif
+          if-no-files-found: warn
+
+  sca-owasp-dependency-check:
+    name: SCA - OWASP Dependency-Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Varre o repo e gera HTML + XML + JSON
+      - name: Dependency-Check (scan)
+        uses: dependency-check/Dependency-Check_Action@main
+        with:
+          project: ${{ github.repository }}
+          path: .
+          format: 'HTML,XML,JSON'
+          out: reports
+          args: >
+            --failOnCVSS 0
+            --enableExperimental
+
+      - name: List reports
+        run: |
+          ls -la reports || true
+
+      - name: Upload Dependency-Check reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-check-${{ github.run_id }}
           path: |
-            report_html.html
-            report_json.json
-            report_md.md
-          overwrite: true
-          if-no-files-found: error
+            reports/dependency-check-report.html
+            reports/dependency-check-report.xml
+            reports/dependency-check-report.json
+          if-no-files-found: warn
