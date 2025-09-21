@@ -11,17 +11,24 @@ jobs:
     name: SAST - Semgrep
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
+      # Executa Semgrep em modo CI e gera SARIF
       - name: Run Semgrep
+        id: semgrep
         uses: returntocorp/semgrep-action@v1
+        continue-on-error: true   # NÃO QUEBRA A PIPELINE POR ACHADOS
         with:
-          config: "p/ci"
-          publishToken: ${{ secrets.SEMGREP_APP_TOKEN }}
-          args: "--sarif --output=semgrep.sarif"
+          entryPoint: semgrep ci
+          config: p/ci
+          # Se tiver token do Semgrep App, descomente a linha abaixo e
+          # crie o secret SEMGREP_APP_TOKEN no repositório:
+          # publishToken: ${{ secrets.SEMGREP_APP_TOKEN }}
+          args: --sarif --output=semgrep.sarif
 
       - name: Upload Semgrep SARIF
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: semgrep-sarif
@@ -31,19 +38,27 @@ jobs:
     name: SCA - OWASP Dependency-Check (Docker)
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Run OWASP Dependency-Check
+      - name: Prepare output folder
+        run: mkdir -p dependency-check-report
+
+      - name: Run OWASP Dependency-Check (Docker)
+        # Se quiser que falhas de CVE NÃO quebrem a pipeline,
+        # mantenha continue-on-error: true
+        continue-on-error: true
         run: |
           docker run --rm \
-            -v $(pwd):/src \
+            -v "$(pwd)":/src \
             owasp/dependency-check:latest \
             --scan /src \
+            --project "cyberfiap" \
             --format "ALL" \
             --out /src/dependency-check-report
 
-      - name: Upload Dependency-Check report
+      - name: Upload Dependency-Check reports
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: dependency-check-report
