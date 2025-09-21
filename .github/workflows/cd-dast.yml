@@ -11,27 +11,54 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run ZAP Baseline (Docker)
+      # 1) Executa o ZAP em um container nomeado
+      - name: Run ZAP Baseline (Docker, named container)
         run: |
-          docker run --rm \
+          docker run --name zapscan --rm -t \
             -v "${{ github.workspace }}:/zap/wrk/:rw" \
-            -t owasp/zap2docker-stable \
+            owasp/zap2docker-stable \
             zap-baseline.py \
             -t http://testphp.vulnweb.com \
-            -r /zap/wrk/zap_report.html \
-            -J /zap/wrk/zap_report.json || true
+            -r report.html \
+            -J report.json || true
 
-      - name: Show files in workspace (debug)
+      # 2) Lista o que o ZAP deixou dentro do volume/contêiner
+      - name: Debug - list files
         run: |
-          echo "PWD=$(pwd)"
+          echo "Workspace contents:"
           ls -la
-          echo "----"
-          find . -maxdepth 3 -type f -name "zap_report*.*" -print
+          echo "Looking for ZAP outputs:"
+          find . -maxdepth 3 -type f -name "report*.html" -o -name "report*.json" | sed 's/^/ - /' || true
 
-      - name: Upload ZAP report (use wildcard)
+      # 3) (Plano B) Caso o script tenha salvo só no FS do container, copia para o workspace
+      #    Obs: o container foi --rm, então se não aparecer nada acima, rode sem --rm e copie.
+      - name: (Fallback) Re-run without --rm and copy out artefacts
+        if: ${{ success() && !hashFiles('**/report*.html','**/report*.json') }}
+        run: |
+          echo "No files found via bind mount, trying docker cp fallback..."
+          # Roda novamente sem --rm para poder copiar
+          docker run -d --name zapscan_keep -t \
+            -v "${{ github.workspace }}:/zap/wrk/:rw" \
+            owasp/zap2docker-stable \
+            zap-baseline.py -t http://testphp.vulnweb.com -r report.html -J report.json || true
+          # Espera terminar (até 3 minutos)
+          for i in $(seq 1 36); do
+            if ! docker ps --filter "name=zapscan_keep" --filter "status=running" --format '{{.Names}}' | grep -q zapscan_keep; then
+              break
+            fi
+            sleep 5
+          done
+          # Copia quaisquer .html/.json que estejam em /zap/wrk
+          docker cp zapscan_keep:/zap/wrk/. "${{ github.workspace }}/" || true
+          docker rm -f zapscan_keep || true
+          echo "After docker cp:"
+          find . -maxdepth 3 -type f -name "report*.html" -o -name "report*.json" | sed 's/^/ - /' || true
+
+      # 4) Faz upload (pega qualquer report*.html/json que exista)
+      - name: Upload ZAP report
         uses: actions/upload-artifact@v4
         with:
           name: zap-report
           path: |
-            **/zap_report.html
-            **/zap_report.json
+            **/report*.html
+            **/report*.json
