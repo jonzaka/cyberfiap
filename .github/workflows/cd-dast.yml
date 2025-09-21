@@ -12,56 +12,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # (opcional) login no GHCR para evitar "denied" em alguns runners/regiões
-      - name: Docker login GHCR
-        run: echo "${{ github.token }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-
-      # Tenta via Docker oficial (gera zap_report.* no workspace)
-      - name: Try ZAP via Docker (GHCR)
-        id: zap_docker
-        continue-on-error: true
-        run: |
-          set -e
-          docker pull ghcr.io/zaproxy/zap2docker-stable:latest
-          docker run --rm \
-            -v "${{ github.workspace }}:/zap/wrk/:rw" \
-            ghcr.io/zaproxy/zap2docker-stable:latest \
-            zap-baseline.py \
-            -t http://testphp.vulnweb.com \
-            -w /zap/wrk/zap_report.html \
-            -J /zap/wrk/zap_report.json || true
-          # marca sucesso deste caminho
-          echo "ok=1" >> $GITHUB_OUTPUT
-
-      # Fallback: usa a Action oficial. IMPORTANTE: não deixar ela falhar se o upload interno der erro.
-      - name: Fallback to ZAP Action (no issues)
-        if: steps.zap_docker.outputs.ok != '1'
+      # Roda a action oficial do ZAP. Se ela falhar ao subir artifact interno,
+      # seguimos em frente (vamos fazer nosso próprio upload).
+      - name: Run ZAP Baseline (ignore internal artifact errors)
+        id: zap
         uses: zaproxy/action-baseline@v0.12.0
-        continue-on-error: true          # << evita quebrar por causa do artifact interno "zap_scan"
+        continue-on-error: true
         with:
           target: "http://testphp.vulnweb.com"
-          cmd_options: "-a -j"           # JSON + ativo leve
-          allow_issue_writing: false     # não abrir issues
-          artifact_name: zap-report      # se aceitar, ótimo; se não, ignoramos (temos nosso upload abaixo)
-        env:
-          GITHUB_TOKEN: ""               # garante que não tenta usar o token
+          cmd_options: "-a -j"
+          allow_issue_writing: false
+          # Mesmo se ela tentar criar artifact, não tem problema — não vamos depender disso.
+          artifact_name: zapreport
 
-      # Mostra o que foi gerado (para conferência rápida no log)
+      # Só para conferência no log
       - name: Show generated reports
         run: |
           echo "Workspace files:"
           ls -la
-          echo "Looking for ZAP reports:"
-          find . -maxdepth 3 -type f \( -name "zap_report*.html" -o -name "zap_report*.json" -o -name "report_html.html" -o -name "report_json.json" \) -print || true
+          echo "Expecting these files from ZAP action:"
+          ls -la report_* || true
 
-      # Nosso upload (independente da action interna). Cobre ambos os nomes.
-      - name: Upload ZAP reports
+      # Nosso upload oficial (independente da action do ZAP)
+      - name: Upload ZAP reports (ours)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: zap-report
+          name: zapreport
           path: |
-            zap_report*.html
-            zap_report*.json
             report_html.html
             report_json.json
+            report_md.md
           if-no-files-found: warn
