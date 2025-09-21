@@ -1,4 +1,4 @@
-name: CI - Security (SAST + SCA)
+name: DAST - ZAP Baseline Scan
 
 on:
   push:
@@ -9,63 +9,56 @@ on:
 
 permissions:
   contents: read
+  actions: write
 
 jobs:
-  sast-semgrep:
-    name: SAST - Semgrep
+  zap-baseline:
+    name: ZAP Baseline (DAST)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Semgrep: usa as regras de CI (cobertura geral) e falha se achar findings de severidade média/alta.
-      - name: Run Semgrep
-        uses: returntocorp/semgrep-action@v1
+      # Executa o ZAP Baseline com saída em JSON/MD/HTML.
+      # Marcado como continue-on-error para não "quebrar" o job se o ZAP retornar exit code 2 (warnings).
+      - name: Run ZAP Baseline
+        id: zap
+        uses: zaproxy/action-baseline@v0.12.0
+        continue-on-error: true
         with:
-          config: p/ci
-          generateSarif: true
-          sarifFile: semgrep.sarif
+          target: http://testphp.vulnweb.com
+          cmd_options: -a -j
+          docker_name: ghcr.io/zaproxy/zaproxy:stable
+          allow_issue_writing: false
+          # não dependemos do upload interno do action (estava falhando), faremos upload manual abaixo
         env:
-          SEMGREP_RULES: p/ci
+          # se um dia precisar autenticação por header:
+          # ZAP_AUTH_HEADER: X-Auth-Token
+          # ZAP_AUTH_HEADER_VALUE: ${{ secrets.ZAP_AUTH_TOKEN }}
+          # ZAP_AUTH_HEADER_SITE: testphp.vulnweb.com
+          TZ: UTC
 
-      - name: Upload Semgrep SARIF
-        uses: actions/upload-artifact@v4
-        with:
-          name: semgrep-sarif-${{ github.run_id }}
-          path: semgrep.sarif
-          if-no-files-found: warn
-
-  sca-owasp-dependency-check:
-    name: SCA - OWASP Dependency-Check
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      # Varre o repo e gera HTML + XML + JSON
-      - name: Dependency-Check (scan)
-        uses: dependency-check/Dependency-Check_Action@main
-        with:
-          project: ${{ github.repository }}
-          path: .
-          format: 'HTML,XML,JSON'
-          out: reports
-          args: >
-            --failOnCVSS 0
-            --enableExperimental
-
-      - name: List reports
+      # Os arquivos são criados no workspace pela action anterior:
+      # report_json.json, report_md.md, report_html.html
+      - name: List generated reports
         run: |
-          ls -la reports || true
+          ls -la
+          ls -la report_* || true
 
-      - name: Upload Dependency-Check reports
+      - name: Upload ZAP reports (HTML/JSON/MD)
         uses: actions/upload-artifact@v4
         with:
-          name: dependency-check-${{ github.run_id }}
+          name: zapreport-${{ github.run_id }}
           path: |
-            reports/dependency-check-report.html
-            reports/dependency-check-report.xml
-            reports/dependency-check-report.json
+            report_html.html
+            report_json.json
+            report_md.md
+          overwrite: true
           if-no-files-found: warn
+
+      # Opcional: se quiser forçar o job como sucesso mesmo se o step do ZAP tiver saído com erro.
+      - name: Mark job successful (always)
+        if: always()
+        run: echo "Done ✅"
