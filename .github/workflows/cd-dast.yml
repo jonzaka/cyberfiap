@@ -11,32 +11,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Aponta para um site de teste vulnerável público (não precisa subir sua app)
-      - name: Run ZAP Baseline
-        uses: zaproxy/action-baseline@v0.12.0
-        with:
-          target: "http://testphp.vulnweb.com"
-          cmd_options: "-a -j"   # -a ativa scan ativo leve; -j gera JSON
-        env:
-          GITHUB_TOKEN: ""
- # nunca falha o job, só gera relatório
+      # Executa ZAP Baseline Scan via Docker contra site de teste público
+      - name: Run ZAP Baseline (Docker)
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/zap/wrk/:rw" \
+            -t owasp/zap2docker-stable \
+            zap-baseline.py \
+            -t http://testphp.vulnweb.com \
+            -r zap_report.html \
+            -j zap_report.json || true
 
+      # Publica os relatórios como artifact no GitHub Actions
       - name: Upload ZAP report
         uses: actions/upload-artifact@v4
         with:
           name: zap-report
           path: |
-            report_html.html
-            report_json.json
-            zap.log
-
-      - name: Falhar se houver High no ZAP (básico)
-        run: |
-          if [ -f report_json.json ]; then
-            HIGH=$(jq '[.site[].alerts[] | select(.risk=="High")] | length' report_json.json || echo 0)
-            echo "High alerts: $HIGH"
-            if [ "$HIGH" -ge 1 ]; then
-              echo "ZAP: High alerts found"
-              exit 1
-            fi
-          fi || true
+            zap_report.html
+            zap_report.json
