@@ -19,8 +19,9 @@ jobs:
             -t owasp/zap2docker-stable \
             zap-baseline.py \
             -t http://testphp.vulnweb.com \
-            -r zap_report.html \
-            -j zap_report.json || true
+            -r /zap/wrk/zap_report.html \
+            -j /zap/wrk/zap_report.json || true
+
 
       # Publica os relatórios como artifact no GitHub Actions
       - name: Upload ZAP report
@@ -30,3 +31,4 @@ jobs:
           path: |
             zap_report.html
             zap_report.json
+
