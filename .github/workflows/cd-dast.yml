@@ -5,7 +5,6 @@ on:
     branches: [ "main" ]
   workflow_dispatch:
 
-# ✅ dá permissão para criar artifacts
 permissions:
   contents: read
   actions: write
@@ -14,29 +13,37 @@ jobs:
   dast_zap:
     name: DAST - ZAP Baseline Scan
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      # roda a action oficial do ZAP; se ela falhar ao subir artifact interno, seguimos
-      - name: Run ZAP Baseline (ignore internal artifact errors)
-        id: zap
-        uses: zaproxy/action-baseline@v0.12.0
-        continue-on-error: true
-        with:
-          target: "http://testphp.vulnweb.com"
-          cmd_options: "-a -j"
-          allow_issue_writing: false
-          # não dependemos desse artifact interno, mas deixar não atrapalha
-          artifact_name: zap
+      - name: Run ZAP Baseline (Docker)
+        run: |
+          set -e
+          # cria arquivos de saída com permissão de escrita
+          touch report_json.json report_md.md report_html.html
+          chmod a+w report_json.json report_md.md report_html.html
 
-      - name: List generated reports
+          # roda o ZAP baseline e grava os 3 formatos
+          docker pull ghcr.io/zaproxy/zaproxy:stable -q
+          docker run \
+            -v "$PWD:/zap/wrk/:rw" \
+            --network=host \
+            -t ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py \
+              -t "http://testphp.vulnweb.com" \
+              -J report_json.json \
+              -w report_md.md \
+              -r report_html.html \
+              -a -j
+
+      - name: List outputs (debug)
         run: |
           ls -la
           ls -la report_* || true
 
-      # ✅ nosso upload oficial, com nome único e overwrite
-      - name: Upload ZAP reports
-        if: always()
+      - name: Upload ZAP reports (artifact único por execução)
         uses: actions/upload-artifact@v4
         with:
           name: zapreport-${{ github.run_id }}
@@ -45,4 +52,4 @@ jobs:
             report_json.json
             report_md.md
           overwrite: true
-          if-no-files-found: warn
+          if-no-files-found: error
