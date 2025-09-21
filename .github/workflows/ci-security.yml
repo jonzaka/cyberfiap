@@ -1,0 +1,72 @@
+name: CI - Security (SAST + SCA)
+
+on:
+  pull_request:
+  push:
+    branches: [ "**" ]
+
+jobs:
+  sast_semgrep:
+    name: SAST - Semgrep
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python (opcional)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install semgrep
+        run: pipx install semgrep || pip install --user semgrep
+
+      - name: Run Semgrep (gera JSON, SARIF e HTML)
+        run: |
+          semgrep --config auto --json > semgrep.json || true
+          semgrep --config auto --sarif > semgrep.sarif || true
+          semgrep --config auto --output semgrep.html || true
+
+      - name: Upload Semgrep artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: semgrep-reports
+          path: |
+            semgrep.json
+            semgrep.sarif
+            semgrep.html
+
+      - name: Publicar SARIF no GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
+
+      - name: Falhar se Semgrep achar High/Critical (simples)
+        run: |
+          if jq -e '.results[] | select(.check_id != null) | select(.severity=="ERROR" or .severity=="HIGH")' semgrep.json >/dev/null 2>&1; then
+            echo "Semgrep: High/Critical findings detected. Failing job."
+            exit 1
+          fi || true
+
+  sca_dependency_check:
+    name: SCA - OWASP Dependency-Check
+    runs-on: ubuntu-latest
+    needs: sast_semgrep
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run OWASP Dependency-Check (Action oficial)
+        uses: dependency-check/Dependency-Check_Action@main
+        with:
+          project: "${{ github.repository }}"
+          path: "."
+          format: "HTML,JSON"
+          out: "depcheck"
+          args: >
+            --enableExperimental
+            --failOnCVSS 7.0
+
+      - name: Upload Dependency-Check reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-check-reports
+          path: depcheck/
