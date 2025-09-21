@@ -3,62 +3,70 @@ name: CD - DAST (ZAP Baseline)
 on:
   push:
     branches: [ "main" ]
+  workflow_dispatch:
 
 jobs:
   dast_zap:
     name: DAST - ZAP Baseline Scan
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
-      # 1) Executa o ZAP em um container nomeado
-      - name: Run ZAP Baseline (Docker)
+      # 1) Tenta puxar e rodar a imagem do ZAP (GHCR) com retry
+      - name: Try ZAP via Docker (GHCR) with retry
+        id: zap_docker
         run: |
-          docker run --rm \
-            -v "${{ github.workspace }}:/zap/wrk/:rw" \
-            ghcr.io/zaproxy/zap2docker-stable \
-            zap-baseline.py \
-            -t http://testphp.vulnweb.com \
-            -w /zap/wrk/zap_report.html \
-            -J /zap/wrk/zap_report.json || true
-
-      # 2) Lista o que o ZAP deixou dentro do volume/contêiner
-      - name: Debug - list files
-        run: |
-          echo "Workspace contents:"
-          ls -la
-          echo "Looking for ZAP outputs:"
-          find . -maxdepth 3 -type f -name "report*.html" -o -name "report*.json" | sed 's/^/ - /' || true
-
-      # 3) (Plano B) Caso o script tenha salvo só no FS do container, copia para o workspace
-      #    Obs: o container foi --rm, então se não aparecer nada acima, rode sem --rm e copie.
-      - name: (Fallback) Re-run without --rm and copy out artefacts
-        if: ${{ success() && !hashFiles('**/report*.html','**/report*.json') }}
-        run: |
-          echo "No files found via bind mount, trying docker cp fallback..."
-          # Roda novamente sem --rm para poder copiar
-          docker run -d --name zapscan_keep -t \
-            -v "${{ github.workspace }}:/zap/wrk/:rw" \
-            owasp/zap2docker-stable \
-            zap-baseline.py -t http://testphp.vulnweb.com -r report.html -J report.json || true
-          # Espera terminar (até 3 minutos)
-          for i in $(seq 1 36); do
-            if ! docker ps --filter "name=zapscan_keep" --filter "status=running" --format '{{.Names}}' | grep -q zapscan_keep; then
+          set -e
+          tries=3
+          ok=0
+          for i in $(seq 1 $tries); do
+            echo "Attempt $i to pull and run ZAP from GHCR..."
+            if docker pull ghcr.io/zaproxy/zap2docker-stable:latest; then
+              echo "Pulled image."
+              # roda e grava relatórios no workspace
+              docker run --rm \
+                -v "${{ github.workspace }}:/zap/wrk/:rw" \
+                ghcr.io/zaproxy/zap2docker-stable:latest \
+                zap-baseline.py \
+                -t http://testphp.vulnweb.com \
+                -w /zap/wrk/zap_report.html \
+                -J /zap/wrk/zap_report.json || true
+              ok=1
               break
             fi
-            sleep 5
+            echo "Pull failed, waiting 10s and retrying..."
+            sleep 10
           done
-          # Copia quaisquer .html/.json que estejam em /zap/wrk
-          docker cp zapscan_keep:/zap/wrk/. "${{ github.workspace }}/" || true
-          docker rm -f zapscan_keep || true
-          echo "After docker cp:"
-          find . -maxdepth 3 -type f -name "report*.html" -o -name "report*.json" | sed 's/^/ - /' || true
+          echo "ok=$ok" >> $GITHUB_OUTPUT
 
-      # 4) Faz upload (pega qualquer report*.html/json que exista)
-      - name: Upload ZAP report
+      # 2) Se o Docker falhar (ex.: denied/rate limit), usa a Action oficial sem abrir issue
+      - name: Fallback to ZAP Action (no issues)
+        if: steps.zap_docker.outputs.ok != '1'
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: "http://testphp.vulnweb.com"
+          cmd_options: "-a -j"        # JSON + um pouco de ativo
+          allow_issue_writing: false  # NÃO criar issue
+        env:
+          GITHUB_TOKEN: ""            # garante que não tentará usar token
+
+      # 3) Mostra o que foi gerado (debug rápido)
+      - name: Show generated reports
+        run: |
+          echo "Workspace files:"
+          ls -la
+          echo "Looking for ZAP reports:"
+          find . -maxdepth 3 -type f \( -name "zap_report*.html" -o -name "zap_report*.json" -o -name "report_html.html" -o -name "report_json.json" \) -print || true
+
+      # 4) Sobe artifacts (cobre os dois nomes possíveis)
+      - name: Upload ZAP reports
         uses: actions/upload-artifact@v4
         with:
           name: zap-report
           path: |
-            **/report*.html
-            **/report*.json
+            zap_report*.html
+            zap_report*.json
+            report_html.html
+            report_json.json
+          if-no-files-found: warn
