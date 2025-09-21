@@ -2,64 +2,51 @@ name: CI - Security (SAST + SCA)
 
 on:
   push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
 
 jobs:
-  semgrep:
+  sast-semgrep:
     name: SAST - Semgrep
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Executa Semgrep em modo CI e gera SARIF
-      - name: Run Semgrep
-        id: semgrep
+      - name: Run Semgrep (p/ci)
         uses: returntocorp/semgrep-action@v1
-        continue-on-error: true   # NÃO QUEBRA A PIPELINE POR ACHADOS
         with:
-          entryPoint: semgrep ci
           config: p/ci
-          # Se tiver token do Semgrep App, descomente a linha abaixo e
-          # crie o secret SEMGREP_APP_TOKEN no repositório:
-          # publishToken: ${{ secrets.SEMGREP_APP_TOKEN }}
-          args: --sarif --output=semgrep.sarif
+          # Se quiser falhar quando encontrar findings severos, adicione:
+          # args: --error
 
-      - name: Upload Semgrep SARIF
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: semgrep-sarif
-          path: semgrep.sarif
-
-  dependency-check:
+  sca-dependency-check:
     name: SCA - OWASP Dependency-Check (Docker)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Prepare output folder
+      - name: Prepare report folder
         run: mkdir -p dependency-check-report
 
-      - name: Run OWASP Dependency-Check (Docker)
-        # Se quiser que falhas de CVE NÃO quebrem a pipeline,
-        # mantenha continue-on-error: true
-        continue-on-error: true
+      - name: Run OWASP Dependency-Check (disable OSS Index)
+        shell: bash
         run: |
           docker run --rm \
             -v "$(pwd)":/src \
+            ${NVD_API_KEY:+-e NVD_API_KEY="$NVD_API_KEY"} \
             owasp/dependency-check:latest \
-            --scan /src \
-            --project "cyberfiap" \
-            --format "ALL" \
-            --out /src/dependency-check-report
+              --scan /src \
+              --project "cyberfiap" \
+              --format "ALL" \
+              --out /src/dependency-check-report \
+              --disableOssIndex
+        env:
+          # OPCIONAL (acelera bastante os próximos runs se você tiver uma chave do NVD):
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
 
-      - name: Upload Dependency-Check reports
-        if: always()
+      - name: Upload Dependency-Check report
         uses: actions/upload-artifact@v4
         with:
           name: dependency-check-report
-          path: dependency-check-report
+          path: dependency-check-report/**
+          if-no-files-found: error
