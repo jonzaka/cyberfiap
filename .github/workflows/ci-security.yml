@@ -15,8 +15,6 @@ jobs:
         uses: returntocorp/semgrep-action@v1
         with:
           config: p/ci
-          # Se quiser falhar quando encontrar findings severos, adicione:
-          # args: --error
 
   sca-dependency-check:
     name: SCA - OWASP Dependency-Check (Docker)
@@ -41,7 +39,7 @@ jobs:
               --out /src/dependency-check-report \
               --disableOssIndex
         env:
-          # OPCIONAL (acelera bastante os próximos runs se você tiver uma chave do NVD):
+
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
 
       - name: Upload Dependency-Check report
